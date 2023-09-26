@@ -1,0 +1,700 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+ITS au niveau de chaque variable de réponse on regarde différence courbe pour EMS 
+
+```{r}
+library(lmtest)
+library(vcd)
+library(Epi)
+library(tsModel)
+library(splines)
+library(tidyverse)
+library(gt)
+```
+## fonction GLM R 
+
+### N05A
+
+```{r}
+
+# on prépare une base EMS tous patients avec la pop par année sans distinction de sexe & d'âge
+its_ems <- data_std_ind_mensuel_regul %>%
+  dplyr::filter(territoire == "Eurométropole de Strasbourg") %>%
+  group_by(temps_obs, mois,année) %>%
+     summarise(N05A = sum(N05A), 
+            N05B = sum(N05B), 
+            NO5C = sum(N05C), 
+            N06A = sum(N06A)) %>%
+  ungroup()
+
+pop_ems_its <- pop_conso_ems %>%
+  group_by(année) %>%
+  summarise(pop = sum(pop_conso)) %>%
+  ungroup()
+
+its_ems <- its_ems %>%
+  left_join(pop_ems_its, by = "année")
+
+its_ems <- its_ems %>%
+    mutate(covid = case_when(
+    temps_obs < 27 ~ "0", 
+    temps_obs >= 27 ~ "1"
+  ))
+
+its_ems$covid <- as.factor(its_ems$covid)
+its_ems$covid <- its_ems$covid %>%
+    fct_recode("Avant mars 2020" = "0", 
+             "Après mars 2020" = "1")
+```
+
+```{r}
+model1 <- glm(N05A ~ offset(log(pop)) + covid + temps_obs, family = "poisson", data = its_ems)
+summary(model1)$dispersion
+summary(model1)
+```
+
+
+```{r}
+model2 <-glm(N05A ~ offset(log(pop)) + covid + temps_obs, family = "quasipoisson", data = its_ems)
+summary(model2)
+```
+
+```{r}
+# visualisation des résidus
+res <- residuals(model2, type = "deviance")
+plot(its_ems$temps_obs, res)
+```
+```{r}
+# visualisation de l'autocorrélation entre les observations t et t-1
+acf(res)
+```
+
+```{r}
+pacf(res)
+```
+
+```{r}
+model3 <- glm(N05A ~ offset(log(pop)) + covid + temps_obs + harmonic(mois,2,12), family = "poisson", data = its_ems)
+summary(model3)
+round(ci.lin(model3,Exp=T),3)
+```
+
+```{r resultats_modele}
+its_ems$temps_obs <- as.numeric(its_ems$temps_obs)
+
+pred1 <- predict(model1, type="response", its_ems) / (its_ems$pop) * 10^3
+```
+
+```{r contrefactuel}
+
+```
+
+```{r slope_change}
+model1_s <- glm(N05A ~ offset(log(pop)) + covid + temps_obs + covid*temps_obs, family = "poisson", data = its_ems)
+summary(model1)$dispersion
+summary(model1_s)
+gtsummary::tbl_regression(model1_s, exponentiate = T)
+
+pred1_s <- predict(model1_s, type="response", its_ems) / (its_ems$pop) * 10^3
+```
+```{r}
+anova(model1, model1_s)
+```
+
+
+```{r graphique_N05A}
+its_ems$temps_obs <- as.factor(its_ems$temps_obs)
+its_ems %>%
+  ggplot(aes(temps_obs))+
+  geom_point(aes(y = (N05A/pop*1000)), col = "gray") +
+  scale_y_continuous(limits = c(0,15))+
+  geom_line(aes(y = pred1, group = 1),  col="steelblue") + 
+  geom_line(aes(y = pred1_s, group =1), col = "darkblue")+
+  geom_vline(xintercept = 27, col = "firebrick", linetype = "dashed") +
+  labs(x = "Temps (mois)", 
+       y = "Prévalence par mois pour 1000 consommants") +
+  theme_classic() 
+
+
+```
+
+```{r}
+gtsummary::tbl_regression(model1, exponentiate = T)
+```
+
+```{r}
+data3 <- as.data.frame(cbind( T= 230, D = 0, P = 0)) # Data if the intervention does not occur
+
+y3 <- predict(regTS, data3)
+```
+
+
+### N05B
+```{r}
+model1_b <- glm(N05B ~ offset(log(pop)) + covid + temps_obs, family = "poisson", data = its_ems)
+summary(model1_b)
+gtsummary::tbl_regression(model1_b, exponentiate = T)
+pred1_b <- predict(model1_b, type="response", its_ems) / (its_ems$pop) * 10^3
+```
+
+```{r slope_change_N05B}
+its_ems$temps_obs <- as.numeric(its_ems$temps_obs)
+model1_b_s <- glm(N05B ~ offset(log(pop)) + covid + temps_obs + covid*temps_obs, family = "poisson", data = its_ems)
+summary(model1_b_s)
+
+pred1_bs <- predict(model1_b_s, type="response", its_ems) / (its_ems$pop) * 10^3
+```
+
+```{r graphique_N05B}
+its_ems$temps_obs <- as.factor(its_ems$temps_obs)
+its_ems %>%
+  ggplot(aes(temps_obs))+
+  geom_point(aes(y = (N05B/pop*1000)), col = "gray") +
+  scale_y_continuous(limits = c(0,60))+
+  geom_line(aes(y = pred1_bs, group =1), col = "darkblue")+
+  geom_vline(xintercept = 27, col = "firebrick", linetype = "dashed") +
+  labs(x = "Temps (mois)", 
+       y = "Prévalence par mois pour 1000 consommants") +
+  theme_classic() 
+
+```
+
+### N05C 
+
+```{r slope_change_N05C}
+its_ems$temps_obs <- as.numeric(its_ems$temps_obs)
+model1_c_s <- glm(NO5C ~ offset(log(pop)) + covid + temps_obs + covid*temps_obs, family = "poisson", data = its_ems)
+summary(model1_c_s)
+```
+
+```{r}
+pred1_cs <- predict(model1_c_s, type="response", its_ems) / (its_ems$pop) * 10^3
+```
+
+```{r graphique_N05C}
+its_ems$temps_obs <- as.factor(its_ems$temps_obs)
+its_ems %>%
+  ggplot(aes(temps_obs))+
+  geom_point(aes(y = (NO5C/pop*1000)), col = "gray") +
+  scale_y_continuous(limits = c(0,25))+
+  geom_line(aes(y = pred1_cs, group =1), col = "darkblue")+
+  geom_vline(xintercept = 27, col = "firebrick", linetype = "dashed") +
+  labs(x = "Temps (mois)", 
+       y = "Prévalence par mois pour 1000 consommants") +
+  theme_classic() 
+```
+Pour les hypnotiques, un ralentissement de la baisse.
+
+### N06A 
+
+```{r slope_change_6A}
+model1_6A <- glm(N06A ~ offset(log(pop)) + covid + temps_obs + covid*temps_obs, family = "quasi-poisson", data = its_ems)
+summary(model1_6A)
+```
+
+```{r}
+pred1_6A <- predict(model1_6A, type="response", its_ems) / (its_ems$pop) * 10^3
+```
+
+```{r contrefactuel_N06A}
+
+```
+
+```{r graphique_6A}
+its_ems$temps_obs <- as.factor(its_ems$temps_obs)
+its_ems %>%
+  ggplot(aes(temps_obs))+
+  geom_point(aes(y = (N06A/pop*1000)), col = "gray") +
+  scale_y_continuous(limits = c(0,60))+
+  geom_line(aes(y = pred1_6A, group =1), col = "darkblue")+
+  geom_vline(xintercept = 27, col = "firebrick", linetype = "dashed") +
+  labs(x = "Temps (mois)", 
+       y = "Prévalence par mois pour 1000 consommants") +
+  theme_classic() 
+```
+
+## fonction its_poisson 
+```{r}
+library(its2es)
+
+data_ems <- data_std_ind_menseul_tsp %>%
+  dplyr::filter(territoire == "Eurométropole de Strasbourg") %>%
+  droplevels() %>%
+  group_by(temps) %>%
+   summarise(N05A = sum(N05A), 
+            N05B = sum(N05B), 
+            NO5C = sum(N05C), 
+            N06A = sum(N06A)) %>%
+  ungroup()
+
+# temps_obs rajouté par le script temps_obs.R 
+
+data_ems <- data_ems %>%
+   mutate(covid = case_when(
+    temps_obs < 27 ~ "0", 
+    temps_obs >= 27 ~ "1"
+  ))
+
+data_ems <- data_ems %>%
+    mutate(mois = str_sub(temps, -2, -1), 
+         année = str_sub(temps,1,4))
+
+data_ems <- data_ems %>%
+  left_join(pop_ems, by = "année")
+```
+
+```{r}
+
+data_ems$mois <- as.numeric(data_ems$mois)
+N05A<- as.formula("N05A ~ temps_obs")
+start_interr <- which(regul1$année == "2020" & regul1$mois == "3" | regul1$année == "2021")[1]
+fit <- its_poisson(data=data_ems,form=N05A,offset_name="pop", 
+                   time_name = "temps_obs",intervention_start_ind=start_interr,over_dispersion=TRUE, 
+                   freq=12, seasonality= "full", impact_model = "full",counterfactual = TRUE)
+
+```
+
+```{r}
+
+N05A_ems <- as.data.frame(fit$data)
+
+pred_N05A <- predict(fit$model, type = "response")
+
+N05A_ems %>%
+  ggplot(aes(x=temps_obs, y = N05A)) +
+  geom_point(shape = 3, col = "grey8")+
+  geom_line(aes(temps_obs, pred_N05A))
+  scale_y_continuous(limits = c(0,8000))+
+  ggplot2::annotate(geom = "segment", 
+           x = 27, xend = 27, 
+           y = 0, yend = 8000, 
+           col = "firebrick", 
+           linetype = "dashed")
+  labs(x = "Temps d'observation")
+ 
+  
+
+   
+
+```
+
+```{r}
+N05B<- as.formula("N05B ~ temps_obs")
+start_interr <- which(regul1$année == "2020" & regul1$mois == "3" | regul1$année == "2021")[1]
+fit <- its_poisson(data=data_ems,form=N05B,offset_name="pop", 
+                   time_name = "temps_obs",intervention_start_ind=start_interr,over_dispersion=TRUE, 
+                   freq=12, seasonality= "full", impact_model = "full",counterfactual = TRUE)
+
+N05B_ems <- as.data.frame(fit$data)
+N05B_ems <- read_excel("N05B_ems.xlsx")
+
+N05B_ems %>%
+  ggplot(aes(x=temps_obs, y = N05B)) +
+  geom_point(shape = 3, col = "grey8")+
+  geom_smooth(aes(temps_obs, pred, col = "grey8"),se = F, method = "glm", data = subset(N05B_ems, temps_obs > 27))+
+  geom_smooth(aes(temps_obs, pred, col = "grey8"),se = F, method = "glm", data = subset(N05B_ems, temps_obs < 27) )
+  geom_smooth(aes(temps_obs, predC, col = "grey8"), linetype = "dashed",
+              se = F, method = "glm") +
+  scale_y_continuous(limits = c(15000,21000))+
+  ggplot2::annotate(geom = "segment", 
+           x = 27, xend = 27, 
+           y = 0, yend = 21000, 
+           col = "firebrick", 
+           linetype = "dashed")+
+  labs(x = "Temps d'observation")
+   
+
+N05B_ems %>%
+  ggplot(aes(x=temps_obs, y = N05B)) +
+  geom_point(shape = 3, col = "grey8")+
+  geom_line(aes(temps_obs, pred, col = "grey8"),data = subset(N05B_ems, temps_obs > 27))+
+  geom_line(aes(temps_obs, pred, col = "grey8") )+
+  geom_line(aes(temps_obs, predC, col = "grey8"), linetype = "dashed") +
+  scale_y_continuous(limits = c(15000,21000))+
+  ggplot2::annotate(geom = "segment", 
+           x = 27, xend = 27, 
+           y = 0, yend = 21000, 
+           col = "firebrick", 
+           linetype = "dashed")+
+  labs(x = "Temps d'observation")
+
+
+
+```
+
+```{r}
+N05A_ems <- read_excel("N05A_ems.xlsx")
+N05A_ems$temps_obs <- as.numeric(N05A_ems$temps_obs)
+N05A_ems$time_since <- as.numeric(N05A_ems$time_since)
+model_N05A <- N05A_ems %>% 
+  glm(N05A ~ temps_obs + covid + time_since, family = "quasipoisson", data = . )
+pred_N05A <- predict(model_N05A, type = "response")
+
+datanew <- as.data.frame(cbind(N05A = N05A_ems$N05A, temps_obs = N05A_ems$temps_obs, covid = rep("0"), time_since = rep(0)))
+datanew$temps_obs <- as.numeric(datanew$temps_obs)
+datanew$time_since <- as.numeric(datanew$time_since)
+pred_N05A_c <- predict(model_N05A, datanew, type = "response")
+```
+
+```{r}
+N05A_ems %>%
+  ggplot(aes(x=temps_obs, y = N05A)) +
+  geom_point(shape = 3, col = "grey8")+
+  geom_line(aes(temps_obs, pred_N05A, linetype = "Prédictions du modèle"))+
+  geom_line(aes(temps_obs, pred_N05A_c, linetype = "Contrefactuel"))+
+  scale_y_continuous(limits = c(0,8000))+
+  ggplot2::annotate(geom = "segment", 
+           x = 27, xend = 27, 
+           y = 0, yend = 8000, 
+           col = "firebrick", 
+           linetype = "dashed") +
+  ggplot2::annotate(geom = "text", 
+           x = 32 , y = 8000, 
+           label = "Interruption : mars 2020",
+           col = "firebrick", 
+          family= theme_get()$text[["family"]], 
+           size= theme_get()$text[["size"]]/2.5 ) +
+  labs(y = "Effectifs mensuels de consommateurs d'antipsychotiques", 
+       x = "Temps d'observation") +
+  ggplot2::annotate(geom = "text", 
+           label = "Coefficient après l'interruption \n 0.0019 \n p.value = 0.123", 
+           x = 40, 
+           y = 6000, 
+            family= theme_get()$text[["family"]], 
+           size= theme_get()$text[["size"]]/2.5)+
+    ggplot2::annotate(geom = "text", 
+           label = "Coefficient avant l'interruption \n  0.00038 \n p.value < 0.001", 
+           x = 10, 
+           y = 6000, 
+             family= theme_get()$text[["family"]], 
+           size= theme_get()$text[["size"]]/2.5)+
+  scale_linetype_manual(values = c("dashed", "solid"), name = "Légende")
+
+```
+
+```{r}
+# tround2 
+
+N05B_ems$temps_obs <- as.numeric(N05B_ems$temps_obs)
+N05B_ems$time_sinc <- as.numeric(N05B_ems$time_sinc)
+model_N05B <- N05B_ems %>% 
+  glm(N05B ~ temps_obs + covid + time_sinc, family = "quasipoisson", data = . )
+      
+summary(model_N05B)
+
+
+pred_N05B <- predict(model_N05B, type = "response")
+
+datanew <- as.data.frame(cbind(N05B = N05B_ems$N05B, temps_obs = N05B_ems$temps_obs, covid = rep("0"), time_sinc = rep(0)))
+datanew$temps_obs <- as.numeric(datanew$temps_obs)
+datanew$time_sinc <- as.numeric(datanew$time_sinc)
+pred_N05B_c <- predict(model_N05B, datanew, type = "response")
+
+theme_set(theme_tufte() + theme(text=element_text(family="serif", size=10)))
+theme(text = element_text())$text[ c("family", "size") ]
+
+N05B_ems %>%
+  ggplot(aes(x=temps_obs, y = N05B)) +
+  geom_point(shape = 3, col = "grey8")+
+  geom_line(aes(temps_obs, pred_N05B, linetype = "Prédictions du modèle"))+
+  geom_line(aes(temps_obs, pred_N05B_c, linetype = "Contrefactuel"))+
+  scale_y_continuous(limits = c(0,21000))+
+  ggplot2::annotate(geom = "segment", 
+           x = 27, xend = 27, 
+           y = 0, yend = 21000, 
+           col = "firebrick", 
+           linetype = "dashed") +
+  ggplot2::annotate(geom = "text", 
+           x = 32 , y = 21000, 
+           label = "Interruption : mars 2020",
+           col = "firebrick", 
+          family= theme_get()$text[["family"]], 
+           size= theme_get()$text[["size"]]/2.5 ) +
+  labs(y = "Effectifs mensuels de consommateurs d'anxiolytiques", 
+       x = "Temps d'observation") +
+  ggplot2::annotate(geom = "text", 
+           label = "Coefficient après l'interruption \n 0.0011 \n p.value = 0.47", 
+           x = 40, 
+           y = 15000, 
+            family= theme_get()$text[["family"]], 
+           size= theme_get()$text[["size"]]/2.5)+
+    ggplot2::annotate(geom = "text", 
+           label = "Coefficient avant l'interruption \n -0.0011 \n p.value < 0.001", 
+           x = 10, 
+           y = 15000, 
+             family= theme_get()$text[["family"]], 
+           size= theme_get()$text[["size"]]/2.5)+
+  scale_linetype_manual(values = c("dashed", "solid"), name = "Légende")
+  
+```
+
+```{r}
+N05C_ems <- readxl::read_excel("N05C_ems.xlsx")
+```
+
+```{r}
+N05C_ems$temps_obs <- as.numeric(N05C_ems$temps_obs)
+N05C_ems$time_since <- as.numeric(N05C_ems$time_since)
+model_N05C <- N05C_ems %>% 
+  glm(NO5C ~ offset(log(pop)) +temps_obs + covid + time_since, family = "quasipoisson", data = . )
+
+pred_N05C <- (predict(model_N05C, type = "response")/ (N05C_ems$pop) * 10^3)
+
+datanew <- as.data.frame(cbind(N05C = N05C_ems$NO5C, temps_obs = N05C_ems$temps_obs, covid = rep("0"), time_since = rep(0), pop = N05C_ems$pop))
+datanew$temps_obs <- as.numeric(datanew$temps_obs)
+datanew$time_since <- as.numeric(datanew$time_sinc)
+datanew$pop <- as.numeric(datanew$pop)
+pred_N05C_c <- (predict(model_N05C, datanew, type = "response")/ (datanew$pop) * 10^3)
+```
+
+
+```{r}
+```
+
+
+```{r}
+
+N05C_ems %>%
+  ggplot(aes(x=temps_obs, y = NO5C)) +
+  geom_point(shape = 3, col = "grey8")+
+  geom_line(aes(temps_obs, pred_N05C, linetype = "Prédictions du modèle"))+
+  geom_line(aes(temps_obs, pred_N05C_c, linetype = "Contrefactuel")) +
+  scale_y_continuous(limits = c(0,11000))+
+  ggplot2::annotate(geom = "segment", 
+           x = 27, xend = 27, 
+           y = 0, yend = 11000, 
+           col = "firebrick", 
+           linetype = "dashed") +
+  ggplot2::annotate(geom = "text", 
+           x = 32 , y = 11000, 
+           label = "Interruption : mars 2020",
+           col = "firebrick", 
+          family= theme_get()$text[["family"]], 
+           size= theme_get()$text[["size"]]/2.5 ) +
+  labs(y = "Effectifs mensuels de consommateurs d'hypnotiques", 
+       x = "Temps d'observation") +
+  ggplot2::annotate(geom = "text", 
+           label = "Coefficient après l'interruption \n 0.0038 \n p.value < 0.05", 
+           x = 40, 
+           y = 6500, 
+            family= theme_get()$text[["family"]], 
+           size= theme_get()$text[["size"]]/2.5)+
+    ggplot2::annotate(geom = "text", 
+           label = "Coefficient avant l'interruption \n -0.0042131 \n p.value < 0.001", 
+           x = 10, 
+           y = 6500, 
+             family= theme_get()$text[["family"]], 
+           size= theme_get()$text[["size"]]/2.5)+
+  scale_linetype_manual(values = c("dashed", "solid"), name = "Légende")
+```
+```{r}
+N06A_ems <- readxl::read_excel("N06A.xlsx")
+
+N06A_ems$temps_obs <- as.numeric(N06A_ems$temps_obs)
+N06A_ems$time_since <- as.numeric(N06A_ems$time_since)
+model_N06A <- N06A_ems %>% 
+  glm(N06A ~ offset(log(pop)) + temps_obs + covid + time_since, family = "quasipoisson", data = . )
+      
+summary(model_N06A)
+summary(model_N06A)$dispersion
+
+pred_N06A <- (predict(model_N06A, type = "response", N06A_ems)/ (N06A_ems$pop) * 10^3)
+
+datanew <- as.data.frame(cbind(N06A = N06A_ems$N06A, temps_obs = N06A_ems$temps_obs, covid = rep("0"), time_since = rep(0), pop = N06A_ems$pop))
+datanew$temps_obs <- as.numeric(datanew$temps_obs)
+datanew$time_since <- as.numeric(datanew$time_sinc)
+datanew$pop <- as.numeric(datanew$pop)
+pred_N06A_c <- (predict(model_N06A, datanew, type = "response")/ (datanew$pop) * 10^3)
+
+
+```
+
+```{r}
+N06A_ems %>%
+  ggplot(aes(x=temps_obs, y = N06A)) +
+  geom_point(shape = 3, col = "grey8")+
+  geom_line(aes(temps_obs, pred_N06A, linetype = "Prédictions du modèle"))+
+  geom_line(aes(temps_obs, pred_N06A_c, linetype = "Contrefactuel")) +
+  scale_y_continuous(limits = c(0,21000)) +
+  ggplot2::annotate(geom = "segment", 
+           x = 28, xend = 28, 
+           y = 0, yend = 21000, 
+           col = "firebrick", 
+           linetype = "dashed") +
+  ggplot2::annotate(geom = "text", 
+           x = 33 , y = 21000, 
+           label = "Interruption : mars 2020",
+           col = "firebrick", 
+          family= theme_get()$text[["family"]], 
+           size= theme_get()$text[["size"]]/2.5 ) +
+  labs(y = "Effectifs mensuels de consommateurs d'antidépresseurs", 
+       x = "Temps d'observation") +
+  ggplot2::annotate(geom = "text", 
+           label = "Coefficient après l'interruption \n  0.0076 \n p.value < 0.01", 
+           x = 40, 
+           y = 12000, 
+            family= theme_get()$text[["family"]], 
+           size= theme_get()$text[["size"]]/2.5)+
+    ggplot2::annotate(geom = "text", 
+           label = "Coefficient avant l'interruption \n -0.00065 \n p.value < 0.001", 
+           x = 10, 
+           y = 12000, 
+             family= theme_get()$text[["family"]], 
+           size= theme_get()$text[["size"]]/2.5)+
+  scale_linetype_manual(values = c("dashed", "solid"), name = "Légende")
+```
+
+```{r}
+N06A_ems %>%
+  ggplot(aes(x=temps_obs, y = ((N06A/pop)*1000))) +
+  geom_point(shape = 3, col = "grey8")+
+  geom_line(aes(temps_obs, pred_N06A, linetype = "Prédictions du modèle"))+
+  geom_line(aes(temps_obs, pred_N06A_c, linetype = "Contrefactuel")) +
+   scale_y_continuous(limits = c(0,45)) + 
+  ggplot2::annotate(geom = "segment", 
+           x = 28, xend = 28, 
+           y = 0, yend = 45, 
+           col = "firebrick", 
+           linetype = "dashed") +
+  ggplot2::annotate(geom = "text", 
+           x = 33 , y = 45, 
+           label = "Interruption : mars 2020",
+           col = "firebrick", 
+          family= theme_get()$text[["family"]], 
+           size= theme_get()$text[["size"]]/2.5 ) +
+  labs(y = "Effectifs mensuels de consommateurs d'antidépresseurs", 
+       x = "Temps d'observation") +
+  ggplot2::annotate(geom = "text", 
+           label = "Coefficient après l'interruption \n  0.0076 \n p.value < 0.01", 
+           x = 40, 
+           y = 20, 
+            family= theme_get()$text[["family"]], 
+           size= theme_get()$text[["size"]]/2.5)+
+    ggplot2::annotate(geom = "text", 
+           label = "Coefficient avant l'interruption \n -0.00065 \n p.value < 0.001", 
+           x = 10, 
+           y = 20, 
+             family= theme_get()$text[["family"]], 
+           size= theme_get()$text[["size"]]/2.5)+
+  scale_linetype_manual(values = c("dashed", "solid"), name = "Légende")
+  
+```
+
+```{r}
+N05C<- as.formula("NO5C ~ temps_obs")
+start_interr <- which(regul1$année == "2020" & regul1$mois == "3" | regul1$année == "2021")[1]
+fit <- its_poisson(data=data_ems,form=NO5C,offset_name="pop", 
+                   time_name = "temps_obs",intervention_start_ind=start_interr,over_dispersion=TRUE, 
+                   freq=12, seasonality= "full", impact_model = "slope",counterfactual = TRUE)
+
+N05C_ems <- as.data.frame(fit$data)
+```
+
+```{r}
+N05C_ems %>%
+  ggplot(aes(x=temps, y = NO5C)) +
+  geom_point(shape = 3, col = "grey8")+
+  geom_smooth(aes(temps_obs, pred, col = "grey8"),se = F, method = "glm") +
+  geom_smooth(aes(temps_obs, predC, col = "grey8"), linetype = "dashed",
+              se = F, method = "glm") +
+  ggplot2::annotate(geom = "segment", 
+           x = 27, xend = 27, 
+           y = 0, yend = 21000, 
+           col = "firebrick", 
+           linetype = "dashed")
+  labs(x = "Temps d'observation")
+```
+
+```{r}
+N06A<- as.formula("N06A ~ temps_obs")
+start_interr <- which(regul1$année == "2020" & regul1$mois == "3" | regul1$année == "2021")[1]
+fit <- its_poisson(data=data_ems,form=N06A,offset_name="pop", 
+                   time_name = "temps_obs",intervention_start_ind=start_interr,over_dispersion=TRUE, 
+                   freq=12, seasonality= "full", impact_model = "slope",counterfactual = TRUE)
+
+N06A_ems <- as.data.frame(fit$data)
+
+```
+
+```{r}
+
+N06A_ems %>%
+  ggplot(aes(x=temps, y = N06A)) +
+  geom_point(shape = 3, col = "grey8")+
+  geom_smooth(aes(temps_obs, pred, col = "grey8"),se = F, method = "glm") +
+  geom_smooth(aes(temps_obs, predC, col = "grey8"), linetype = "dashed",
+              se = F, method = "glm") +
+  ggplot2::annotate(geom = "segment", 
+           x = 27, xend = 27, 
+           y = 0, yend = 21000, 
+           col = "firebrick", 
+           linetype = "dashed")
+  labs(x = "Temps d'observation")
+```
+
+# tableau résultats pour annexe
+
+```{r}
+gtsummary::tbl_regression(model_N06A)
+```
+
+```{r}
+pchisq(model_N05A$deviance, model_N05A$df.residual, 
+       lower.tail = F)
+```
+
+```{r}
+pchisq(model_N05B$deviance, model_N05B$df.residual, 
+       lower.tail = F)
+```
+```{r}
+pchisq(model_N05C$deviance, model_N05C$df.residual, 
+       lower.tail = F)
+
+pchisq(model_N06A$deviance, model_N06A$df.residual, 
+       lower.tail = F)
+```
+```{r}
+summary(model_N06A)
+ssr <- sum(residuals(model_N05A, type="pearson")^2)
+pchisq(ssr, 99999)
+```
+
+
+```{r}
+ssr <- sum(residuals(model_N05B, type="pearson")^2)
+pchisq(ssr, 99999)
+```
+
+```{r}
+ssr <- sum(residuals(model_N06A, type="pearson")^2)
+pchisq(ssr, 99999)
+```
+
+
+```{r}
+Pearson <- sum((N05A_ems$N05A - model_N05A$fitted.values)^2 
+               / model_N05A$fitted.values)
+1 - pchisq(Pearson, df = model_N05A$df.residual)
+```
+```{r}
+Pearson <- sum((N05B_ems$N05B - model_N05B$fitted.values)^2 
+               / model_N05B$fitted.values)
+round(1 - pchisq(Pearson, df = model_N05B$df.residual), 7)
+```
+
+```{r}
+Pearson <- sum((N06A_ems$N06A - model_N06A$fitted.values)^2 
+               / model_N06A$fitted.values)
+
+Pearson
+round(1 - pchisq(Pearson, df = model_N06A$df.residual), digits = 7)
+```
+```
+```{r}
+
+```
+
