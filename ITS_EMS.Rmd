@@ -3,7 +3,6 @@ title: "R Notebook"
 output: html_notebook
 ---
 
-ITS au niveau de chaque variable de réponse on regarde différence courbe pour EMS 
 
 ```{r}
 library(lmtest)
